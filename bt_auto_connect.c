@@ -1041,41 +1041,6 @@ error:
 	g_main_loop_quit(event_loop);
 	return FALSE ;
 }
-// static gboolean cmd_char_write_common(gpointer user_data)
-// {
-// 	GAttrib *attrib = user_data;
-// 	uint8_t *value;
-// 	size_t len;
-
-// 	if (opt_handle <= 0) {
-// 		g_printerr("A valid handle is required\n");
-// 		goto error;
-// 	}
-
-// 	if (opt_value == NULL || opt_value[0] == '\0') {
-// 		g_printerr("A value is required\n");
-// 		goto error;
-// 	}
-
-// 	len = gatt_attr_data_from_string(opt_value, &value);
-// 	if (len == 0) {
-// 		g_printerr("Invalid value\n");
-// 		goto error;
-// 	}
-
-// 	gatt_write_char(attrib, opt_handle, value, len, char_write_req_cb,
-// 									NULL);
-// 	return FALSE ;
-
-// error:
-// 	g_main_loop_quit(event_loop);
-// 	return FALSE ;
-// }
-
-// static void cmd_char_write(int parameter ,int argcp, char **argvp)
-// {
-//   operation = cmd_char_write_common ;
-// }
 
 enum ENUM_COMMAND{
 	ENUM_COMMAND_LESCAN = 0,
