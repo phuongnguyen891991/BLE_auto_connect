@@ -59,31 +59,28 @@ static gchar *opt_src = NULL;
 static gchar *opt_dst = NULL;
 static gchar *opt_dst_type = NULL;
 static gchar *opt_sec_level = NULL;
-static gchar *opt_value = NULL;
 static bt_uuid_t *opt_uuid = NULL;
-static int opt_handle = -1;
-static int opt_start = 0x0001;
-static int opt_end = 0xffff;
+static const int opt_psm = 0;
 static int opt_mtu = 0;
 static struct hci_dev_info di;
-static const int opt_psm = 0;
+
+static int opt_handle = -1;
+static gchar *opt_value = NULL;
 
 static gboolean opt_listen = FALSE;
 static gboolean got_error = FALSE;
-
-static GSourceFunc operation;
+static int opt_start = 0x0001;
+static int opt_end = 0xffff;
+static GSourceFunc operation,operation1;
+// gpointer user_data;
 struct le_devices le_devices;
 uint8_t flag_connect = 0;
-int unknown_addr = 0; 
-static volatile int signal_received = 0;
-
 #define for_each_opt(opt, long, short) while ((opt=getopt_long(argc, argv, short ? short:"+", long, NULL)) != -1)
 
 #define LE_LINK		0x03
 #define FLAGS_AD_TYPE 0x01
 #define FLAGS_LIMITED_MODE_BIT 0x01
 #define FLAGS_GENERAL_MODE_BIT 0x02
-#define FLAGS_CONNECT				0x01
 #define EIR_FLAGS                   0x01  /* flags */
 #define EIR_UUID16_SOME             0x02  /* 16-bit UUID, more available */
 #define EIR_UUID16_ALL              0x03  /* 16-bit UUID, all listed */
@@ -105,6 +102,12 @@ static volatile int signal_received = 0;
 
 #define BLUETOOTH_DATABASE "devicelist.db"
 
+static void char_write_req_cb(guint8 status, const guint8 *pdu, guint16 plen,
+														gpointer user_data);
+static gboolean char_write_auto( gpointer user_data); 
+static void characteristics(gpointer user_data);
+static volatile int signal_received = 0;
+int unknown_addr = 0; 
 struct le_devices
 {
     bdaddr_t bdaddr;
@@ -151,6 +154,7 @@ static const char
   *err_CONN_FAIL = "connect fail",
   *err_COMM_ERR  = "com error",
   *err_PROTO_ERR = "protocol error",
+  //*err_BAD_CMD   = "can not understand cmd",
   *err_BAD_PARAM = "do not understand parameter";
 
 static const char 
@@ -486,19 +490,6 @@ static void gatts_exec_write_req(const uint8_t *pdu, uint16_t len, gpointer user
 		g_attrib_send(attrib, 0, opdu, olen, NULL, NULL, NULL);
 }
 
-static int strtohandle(const char *src)
-{
-	char *e;
-	int dst;
-
-	errno = 0;
-	dst = strtoll(src, &e, 16);
-	if (errno != 0 || *e != '\0')
-		return -EINVAL;
-
-	return dst;
-}
-
 static void connect_cb(GIOChannel *io, GError *err, gpointer user_data)
 {
 	uint16_t mtu;
@@ -707,16 +698,19 @@ failed:
 
 void check_configuration(int devices_type, int devices_status)
 {
+	printf("check configuration \n");
+	printf("Type: %02X \n",devices_type);
+
 	switch(devices_status)
 	{
 		case 0x00:
 			{
-				printf("device is in unconfigured mode \n");
+				printf("unconfigured \n");
 			break;
 			}
 		case 0x001:
 			{
-				printf("device is in configured mode\n");
+				printf("configured \n");
 				break;
 			}
 		default:
@@ -838,10 +832,12 @@ static int print_advertising_devices(int dd, uint8_t filter_type)
 
 		if (check_report_filter(filter_type, info)) {
 			char name[30];
-
+			//memset(name, 0, sizeof(name));
 			memset(name, 0, sizeof(name));
+			//ba2str(&info->bdaddr, addr);
 			le_devices.bdaddr = info->bdaddr;
-			ba2str(&le_devices.bdaddr, addr);;
+			ba2str(&le_devices.bdaddr, addr);
+			//strcpy(le_devices->name,name);
 
 			le_devices = eir_parse_name(info->data, info->length,
 							name, sizeof(name) - 1);
@@ -851,11 +847,14 @@ static int print_advertising_devices(int dd, uint8_t filter_type)
 			{
 				if(le_devices.status == DEV_UNCONFIGURED | le_devices.status == DEV_CONFIGURED)
 				{
-					flag_connect = FLAGS_CONNECT;
+					flag_connect = 1;
+					printf("le_devices.manufacture: %02X \n",le_devices.manufacturer);
 					check_configuration(le_devices.type,le_devices.status);
+					// opt_dst = g_strdup(addr);
 					goto done;
 				}
 			}
+			printf("--------\n");
 		}
 	}
 done:
@@ -864,94 +863,8 @@ done:
 	if (len < 0)
 		return -1;
 
-	return 0; 	
-}
-
-static void char_discovered_cb(guint8 status, GSList *characteristics, 
-							void* user_data)
-{
-	printf("char_discovered_cb \n");
-	GSList *l;
-	char string2uuid[5];
-	int handle_value;
-
-	if (status) {
-		g_printerr("Discover all characteristics failed: %s\n",
-							att_ecode2str(status));
-		goto done;
-	}
-
-	for (l = characteristics; l; l = l->next) {
-		struct gatt_char *chars = l->data;
-
-		printf("handle: 0x%04x, char properties: 0x%02x, char value "
-				"handle: 0x%04x, uuid: %s\n", chars->handle,
-				chars->properties, chars->value_handle,
-				chars->uuid);
-
-		strncpy(string2uuid,chars->uuid+3,5);
-		handle_value = strtohandle(string2uuid);
-		if(handle_value == SIMPLE_WRITE_CHAR_UUID)
-		{
-			opt_handle = chars->value_handle;
-		}
-	}
-
-done:
-	g_main_loop_quit(event_loop);
-}
-
-static gboolean characteristics(gpointer user_data)
-{
-	GAttrib *attrib = user_data;
-
-	gatt_discover_char(attrib, opt_start, opt_end, opt_uuid,
-						char_discovered_cb, NULL);
-
-	return FALSE;
-}
-
-static void char_write_req_cb(guint8 status, const guint8 *pdu, guint16 plen,
-							gpointer user_data)
-{
-	if (status != 0) {
-		resp_error(err_COMM_ERR); // Todo: status
-		goto done;
-	}
-
-	if (!dec_write_resp(pdu, plen) && !dec_exec_write_resp(pdu, plen)) {
-		resp_error(err_PROTO_ERR);
-		goto done;
-	}
-
-        resp_begin(rsp_WRITE);
-        resp_end();
-done:
-	if (opt_listen == FALSE)
-		g_main_loop_quit(event_loop);
-
-}
-
-static gboolean char_write_auto(gpointer user_data)
-{
-	GAttrib *attrib = user_data;
-	uint8_t *value ;
-	size_t len;
-	char *str_value = "68656c6c6f"; //string "hello"
-	
-	len = gatt_attr_data_from_string(str_value, &value);
-	if (len == 0) {
-		g_printerr("Invalid value\n");
-		goto error;
-	}
-
-	gatt_write_char(attrib, opt_handle, value, len, char_write_req_cb,
-									NULL);
-	return FALSE ;
-
-error:
-	g_main_loop_quit(event_loop);
-	return FALSE ;
+	return 0;
+ 	
 }
 
 static const char *lescan_help =
@@ -1077,20 +990,126 @@ static void * lescan_bt_devices(int dev_id, int argc, char **argv)
 		exit(1);
 	}
 	printf("LE Scan finish ! \n");
+	
 	opt_dst = g_strdup("00:1A:7D:DA:71:0B");
-
+	printf("opt_dst: %s\n",opt_dst);
 	if(flag_connect == 1)
 	{
-		le_connect();	
-		operation = characteristics;
-		g_main_loop_run(event_loop);
+	le_connect();	
+	characteristics(user_data);
+	operation = char_write_auto;
+	g_main_loop_run(event_loop);
 	}
-	disconnect_io();	
+	printf("disconnect_io\n");
+	disconnect_io();
+	
 }
 
 static void cmd_lescan (int dev_id,int argc ,char **argvp)
 {
 	lescan_bt_devices(dev_id,argc,argvp);
+}
+
+static int strtohandle(const char *src)
+{
+	char *e;
+	int dst;
+
+	errno = 0;
+	dst = strtoll(src, &e, 16);
+	if (errno != 0 || *e != '\0')
+		return -EINVAL;
+
+	return dst;
+}
+
+static void char_discovered_cb(guint8 status, GSList *characteristics, 
+							void* user_data)
+{
+	printf("char_discovered_cb \n");
+	GSList *l;
+	char string2uuid[5];
+	int check_handle;
+	if (status) {
+		g_printerr("Discover all characteristics failed: %s\n",
+							att_ecode2str(status));
+		goto done;
+	}
+
+	for (l = characteristics; l; l = l->next) {
+		struct gatt_char *chars = l->data;
+
+		// printf("handle = 0x%04x, char properties = 0x%02x, char value "
+		// 	"handle = 0x%04x, uuid = %s\n", chars->handle,
+		// 	chars->properties, chars->value_handle, chars->uuid);
+
+		strncpy(string2uuid,chars->uuid+3,5);
+		check_handle = strtohandle(string2uuid);
+		printf("check_handle : %X \n",check_handle );
+		if(check_handle == 0xfff3)
+		{
+			opt_handle = chars->value_handle;
+			printf("opt_handle : %X \n",opt_handle);
+		}
+
+	}
+
+done:
+	g_main_loop_quit(event_loop);
+}
+
+static void characteristics(gpointer user_data)
+{
+	printf("Characteristics  \n");
+	GAttrib *attrib = user_data;
+
+	gatt_discover_char(attrib, opt_start, opt_end, opt_uuid,
+						char_discovered_cb, NULL);
+
+	return FALSE;
+}
+
+static void char_write_req_cb(guint8 status, const guint8 *pdu, guint16 plen,
+							gpointer user_data)
+{
+	if (status != 0) {
+		resp_error(err_COMM_ERR); // Todo: status
+		goto done;
+	}
+
+	if (!dec_write_resp(pdu, plen) && !dec_exec_write_resp(pdu, plen)) {
+		resp_error(err_PROTO_ERR);
+		goto done;
+	}
+
+        resp_begin(rsp_WRITE);
+        resp_end();
+done:
+	if (opt_listen == FALSE)
+		g_main_loop_quit(event_loop);
+
+}
+
+static gboolean char_write_auto(gpointer user_data)
+{
+	GAttrib *attrib = user_data;
+	uint8_t *value ;
+	size_t len;
+	char *str_value = "68656c6c6f";
+	
+	len = gatt_attr_data_from_string(str_value, &value);
+	if (len == 0) {
+		g_printerr("Invalid value\n");
+		goto error;
+	}
+	// printf("opt_handle: %.4x \n",opt_handle);
+	gatt_write_char(attrib, opt_handle, value, len, char_write_req_cb,
+									NULL);
+	return FALSE ;
+
+error:
+	g_main_loop_quit(event_loop);
+	return FALSE ;
 }
 
 enum ENUM_COMMAND{
@@ -1142,10 +1161,33 @@ int main(int argc, char *argv[])
 		g_printerr("%s\n", gerr->message);
 		g_error_free(gerr);
 	}
-
+	while (1)
+	{
 		commands[ENUM_COMMAND_LESCAN].func(di.dev_id, argc, argv);
+		sleep(7);
+	}
+
+		if (opt_dst == NULL) 
+		{
+			g_print("Remote Bluetooth address required\n");
+			got_error = TRUE;
+			goto finish;
+		}
+		
+		pchan = gatt_connect(opt_src, opt_dst, opt_dst_type, opt_sec_level,
+						opt_psm, opt_mtu, connect_cb,&gerr);
+		if (pchan == NULL) 
+		{
+			got_error = TRUE;
+			goto finish;
+		}
+
+		event_loop = g_main_loop_new(NULL, FALSE);
+		g_main_loop_run(event_loop);
+		g_main_loop_unref(event_loop);
 
 
+finish:
 	g_option_context_free(context);
 	g_free(opt_src);
 	g_free(opt_dst);

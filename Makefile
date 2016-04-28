@@ -19,11 +19,10 @@ CPPFLAGS += -I$(BLUEZ_PATH)/attrib -I$(BLUEZ_PATH) -I$(BLUEZ_PATH)/lib -I$(BLUEZ
 
 CPPFLAGS += `pkg-config glib-2.0 --cflags`
 LDLIBS += `pkg-config glib-2.0 --libs`
-LIBS_PATH+= -lreadline
 all: $(SRCS_NAME)
 
 $(SRCS_NAME): $(LOCAL_SRCS) $(IMPORT_SRCS)
-	$(CC) -L. $(CFLAGS) $(CPPFLAGS)  -o $@ $(LOCAL_SRCS) $(IMPORT_SRCS) $(LDLIBS) $(LIBS_PATH)
+	$(CC) -L. $(CFLAGS) $(CPPFLAGS)  -o $@ $(LOCAL_SRCS) $(IMPORT_SRCS) $(LDLIBS)
 
 clean:
 	rm -f *.o $(SRCS_NAME)
