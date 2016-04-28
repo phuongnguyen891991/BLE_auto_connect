@@ -73,7 +73,7 @@ static gboolean got_error = FALSE;
 
 static GSourceFunc operation;
 struct le_devices le_devices;
-uint8_t flag_connect = 0;
+uint8_t flags_connect = 0;
 int unknown_addr = 0; 
 static volatile int signal_received = 0;
 
@@ -851,7 +851,7 @@ static int print_advertising_devices(int dd, uint8_t filter_type)
 			{
 				if(le_devices.status == DEV_UNCONFIGURED | le_devices.status == DEV_CONFIGURED)
 				{
-					flag_connect = FLAGS_CONNECT;
+					flags_connect = FLAGS_CONNECT;
 					check_configuration(le_devices.type,le_devices.status);
 					goto done;
 				}
@@ -865,50 +865,6 @@ done:
 		return -1;
 
 	return 0; 	
-}
-
-static void char_discovered_cb(guint8 status, GSList *characteristics, 
-							void* user_data)
-{
-	printf("char_discovered_cb \n");
-	GSList *l;
-	char string2uuid[5];
-	int handle_value;
-
-	if (status) {
-		g_printerr("Discover all characteristics failed: %s\n",
-							att_ecode2str(status));
-		goto done;
-	}
-
-	for (l = characteristics; l; l = l->next) {
-		struct gatt_char *chars = l->data;
-
-		printf("handle: 0x%04x, char properties: 0x%02x, char value "
-				"handle: 0x%04x, uuid: %s\n", chars->handle,
-				chars->properties, chars->value_handle,
-				chars->uuid);
-
-		strncpy(string2uuid,chars->uuid+3,5);
-		handle_value = strtohandle(string2uuid);
-		if(handle_value == SIMPLE_WRITE_CHAR_UUID)
-		{
-			opt_handle = chars->value_handle;
-		}
-	}
-
-done:
-	g_main_loop_quit(event_loop);
-}
-
-static gboolean characteristics(gpointer user_data)
-{
-	GAttrib *attrib = user_data;
-
-	gatt_discover_char(attrib, opt_start, opt_end, opt_uuid,
-						char_discovered_cb, NULL);
-
-	return FALSE;
 }
 
 static void char_write_req_cb(guint8 status, const guint8 *pdu, guint16 plen,
@@ -944,14 +900,55 @@ static gboolean char_write_auto(gpointer user_data)
 		g_printerr("Invalid value\n");
 		goto error;
 	}
-
 	gatt_write_char(attrib, opt_handle, value, len, char_write_req_cb,
 									NULL);
-	return FALSE ;
 
 error:
 	g_main_loop_quit(event_loop);
-	return FALSE ;
+	return  ;
+}
+static void char_discovered_cb(guint8 status, GSList *characteristics, 
+							void* user_data)
+{
+	GSList *l;
+	char string2uuid[5];
+	int handle_value;
+
+	if (status) {
+		g_printerr("Discover all characteristics failed: %s\n",
+							att_ecode2str(status));
+		goto done;
+	}
+
+	for (l = characteristics; l; l = l->next) {
+		struct gatt_char *chars = l->data;
+
+		printf("handle: 0x%04x, char properties: 0x%02x, char value "
+				"handle: 0x%04x, uuid: %s\n", chars->handle,
+				chars->properties, chars->value_handle,
+				chars->uuid);
+
+		strncpy(string2uuid,chars->uuid+3,5);
+		handle_value = strtohandle(string2uuid);
+		if(handle_value == SIMPLE_WRITE_CHAR_UUID)
+		{
+			opt_handle = chars->value_handle;
+			printf("opt_handle:  %x\n",opt_handle);
+		}
+	}
+	
+done:
+	g_main_loop_quit(event_loop);
+
+}
+
+static void characteristics(int argc, char **argv)
+{
+
+	gatt_discover_char(attrib, opt_start, opt_end, opt_uuid,
+						char_discovered_cb, NULL);
+
+	return ;
 }
 
 static const char *lescan_help =
@@ -1079,10 +1076,10 @@ static void * lescan_bt_devices(int dev_id, int argc, char **argv)
 	printf("LE Scan finish ! \n");
 	opt_dst = g_strdup("00:1A:7D:DA:71:0B");
 
-	if(flag_connect == 1)
+	if(flags_connect == FLAGS_CONNECT)
 	{
 		le_connect();	
-		operation = characteristics;
+		operation = char_write_auto;
 		g_main_loop_run(event_loop);
 	}
 	disconnect_io();	
@@ -1117,7 +1114,6 @@ int main(int argc, char *argv[])
 	GOptionGroup *bt_group;
 	GError *gerr = NULL;
 	GIOChannel *pchan;
-
 	opt_sec_level = g_strdup("low");
 	opt_dst_type = g_strdup("public");
 
@@ -1143,8 +1139,25 @@ int main(int argc, char *argv[])
 		g_error_free(gerr);
 	}
 
-		commands[ENUM_COMMAND_LESCAN].func(di.dev_id, argc, argv);
+	commands[ENUM_COMMAND_LESCAN].func(di.dev_id, argc, argv);
 
+		pchan = gatt_connect(opt_src, opt_dst, opt_dst_type, opt_sec_level,
+						opt_psm, opt_mtu, connect_cb,&gerr);
+		if (pchan == NULL) 
+		{
+			got_error = TRUE;
+			goto finish;
+		}
+
+		event_loop = g_main_loop_new(NULL, FALSE);
+		g_main_loop_run(event_loop);
+		g_main_loop_unref(event_loop);
+
+
+finish:
+	event_loop = g_main_loop_new(NULL, FALSE);
+	g_main_loop_run(event_loop);
+	g_main_loop_unref(event_loop);
 
 	g_option_context_free(context);
 	g_free(opt_src);
