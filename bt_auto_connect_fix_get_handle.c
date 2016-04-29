@@ -1079,7 +1079,6 @@ static void * lescan_bt_devices(int dev_id, int argc, char **argv)
 		exit(1);
 	}
 	printf("LE Scan finish ! \n");
-	opt_dst = g_strdup("00:1A:7D:DA:71:0B");
 
 	if(opt_handle != -1)
 		flags_connect = FLAGS_WR_CMD ;
@@ -1145,8 +1144,8 @@ int main(int argc, char *argv[])
 
 	opt_sec_level = g_strdup("low");
 	opt_dst_type = g_strdup("public");
-
-
+	opt_dst = g_strdup(argv[1]);
+	
 	commands[ENUM_COMMAND_LESCAN].func(di.dev_id, argc, argv);
 
 
